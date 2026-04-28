@@ -1,0 +1,16 @@
+# Виртуальное окружение
+venv/
+env/
+
+# База данных SQLite
+*.db
+sso_database.db
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# Скрытые системные файлы
+.DS_Store
+.vscode/
+.idea/
