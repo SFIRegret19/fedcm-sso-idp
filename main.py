@@ -1,7 +1,8 @@
-from fastapi import FastAPI, Request, Response, Depends, HTTPException, status
+from fastapi import FastAPI, Request, Response, Depends, HTTPException, status, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
+import jwt
 import bcrypt
 import uuid
 import time
@@ -81,7 +82,7 @@ def login_user(user_data: UserLogin, response: Response, db: Session = Depends(g
     db.add(session_token)
     db.commit()
 
-    # Устанавливаем Cookie (Именно SameSite="none" и Secure=True нужны для FedCM)
+    # Устанавливаем Cookie (SameSite="none" и Secure=True нужны для FedCM)
     response.set_cookie(
         key="sessionId",
         value=session_token.key,
@@ -159,3 +160,30 @@ def get_client_metadata(request: Request):
         "privacy_policy_url": f"{base_url}/privacy",
         "terms_of_service_url": f"{base_url}/terms"
     }
+
+@app.post("/token", tags=["FedCM"])
+def issue_token(request: Request, account_id: str = Form(None), db: Session = Depends(get_db)):
+    """Финальный этап: выдача JWT токена браузеру"""
+    # Если запрос пришел от FedCM, ID пользователя будет в account_id
+    if not account_id:
+        raise HTTPException(status_code=400, detail="Missing account_id")
+        
+    user = db.query(User).filter(User.guid == account_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    base_url = str(request.base_url).rstrip("/")
+    
+    # Генерируем JWT токен
+    payload = {
+        "iss": base_url, # Кто выдал (наш IdP)
+        "sub": user.guid, # Кому выдан (ID юзера)
+        "email": user.email,
+        "name": user.profile.get("name", ""),
+        "exp": int(time.time()) + 3600 # Срок жизни токена (1 час)
+    }
+    
+    # JWT_SECRET определен в начале файла
+    token = jwt.encode(payload, "my-super-secret-for-prototype-only", algorithm="HS256")
+    
+    return {"token": token}
