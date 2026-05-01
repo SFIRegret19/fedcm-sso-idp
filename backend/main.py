@@ -7,12 +7,19 @@ import jwt
 import bcrypt
 import uuid
 import time
+import os
+from dotenv import load_dotenv
 
 from models import Base, User, Token
 from schemas import UserCreate, UserLogin
 
+# Загружаем переменные из .env файла
+load_dotenv()
+# Берем секреты из окружения (с запасным вариантом на случай ошибки)
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sso_database.db")
+JWT_SECRET = os.getenv("JWT_SECRET", "my-super-secret-for-prototype-only")
+
 # Настройка БД (база будет создана внутри папки backend)
-SQLALCHEMY_DATABASE_URL = "sqlite:///./sso_database.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -24,7 +31,8 @@ app = FastAPI(title="FedCM SSO Identity Provider", version="2.0")
 # Настройка CORS (Разрешаем React-приложению на порту 5173 общаться с нами)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    # Указываем адрес React-приложения 
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -177,5 +185,5 @@ def issue_token(request: Request, account_id: str = Form(None), db: Session = De
         "name": user.profile.get("name", ""),
         "exp": int(time.time()) + 3600
     }
-    token = jwt.encode(payload, "my-super-secret-for-prototype-only", algorithm="HS256")
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
     return {"token": token}
