@@ -1,38 +1,34 @@
-from fastapi import FastAPI, Request, Response, Depends, HTTPException, status, Form
+import os
+import time
+from typing import Annotated
+from fastapi import FastAPI, Request, Response, Depends, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse  # <--- Добавили для редиректа на React
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from fastapi.responses import RedirectResponse  # <--- Добавили импорт для редиректа
+from sqlalchemy.orm import Session
 import jwt
 import bcrypt
-import uuid
-import time
-import os
+from uuid import uuid4
 from dotenv import load_dotenv
 
 from models import Base, User, Token
 from schemas import UserCreate, UserLogin
+from database import engine, SessionLocal
 
-# Загружаем переменные из .env файла
 load_dotenv()
-# Берем секреты из окружения (с запасным вариантом на случай ошибки)
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sso_database.db")
-JWT_SECRET = os.getenv("JWT_SECRET", "my-super-secret-for-prototype-only")
 
-# Настройка БД (база будет создана внутри папки backend)
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Если переменная не найдена, используем запасной вариант (только для локальной разработки)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sso_database.db")
+JWT_SECRET = os.getenv("JWT_SECRET", "fallback-secret-key-change-me")
 
-# Создаем таблицы
+# Создаем таблицы в БД
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="FedCM SSO Identity Provider", version="2.0")
+app = FastAPI(title="Identity Provider (IdP)")
 
-# Настройка CORS (Разрешаем React-приложению на порту 5173 общаться с нами)
+# Настройка CORS (Разрешаем нашему React-домену)
 app.add_middleware(
     CORSMiddleware,
-    # Указываем адрес React-приложения 
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], 
+    allow_origins=["https://rp.test:5173"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,150 +36,111 @@ app.add_middleware(
 
 def get_db():
     db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    try: yield db
+    finally: db.close()
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Криптография) ---
+
+# --- КРИПТОГРАФИЯ ---
 def hash_password(password: str) -> str:
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
-# =====================================================================
-# СВЯЗУЮЩЕЕ ЗВЕНО С REACT (Frontend)
-# =====================================================================
-@app.get("/login", tags=["System"])
-def redirect_to_react_login():
-    """
-    FedCM требует, чтобы login_url был на домене IdP.
-    Поэтому FedCM открывает попап по этому адресу, а мы сразу 
-    перекидываем его на наш React Frontend (порт 5173).
-    """
-    return RedirectResponse(url="http://localhost:5173/login")
-
-# =====================================================================
-# ЭНДПОИНТЫ API ДЛЯ ФРОНТЕНДА
-# =====================================================================
-@app.post("/api/register", tags=["Auth API"])
-def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email уже зарегистрирован")
-    
+# --- API ЭНДПОИНТЫ ---
+@app.post("/api/register")
+async def register(data: UserCreate, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == data.email).first():
+        raise HTTPException(status_code=400, detail="Email уже занят")
     new_user = User(
-        login=user_data.email.split("@")[0],
-        email=user_data.email,
-        password_hash=hash_password(user_data.password),
-        profile={"name": user_data.name}
+        login=data.email,
+        email=data.email,
+        password_hash=hash_password(data.password),
+        profile={"name": data.name}
     )
     db.add(new_user)
     db.commit()
-    return {"status": "success", "message": "Пользователь успешно зарегистрирован"}
+    return {"status": "success"}
 
-@app.post("/api/login", tags=["Auth API"])
-def login_user(user_data: UserLogin, response: Response, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == user_data.email).first()
-    if not user or not verify_password(user_data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Неверный email или пароль")
+@app.post("/api/login")
+async def login(data: UserLogin, response: Response, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user or not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Неверные данные")
     
     session_token = Token(user_guid=user.guid, type="user_token", ts=int(time.time()))
     db.add(session_token)
     db.commit()
 
     response.set_cookie(
-        key="sessionId",
-        value=session_token.key,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        path="/"
+        key="sessionId", value=session_token.key,
+        httponly=True, secure=True, samesite="none", path="/"
     )
-    return {"status": "success", "message": "Вы успешно вошли в систему"}
+    # Сигнал браузеру для FedCM
+    response.headers["Set-Login"] = "logged-in"
+    return {"status": "success", "user": {"name": user.profile.get("name")}}
 
-@app.get("/api/session-check", tags=["Auth API"])
-def check_session(request: Request, db: Session = Depends(get_db)):
-    session_id = request.cookies.get("sessionId")
-    if not session_id:
-        return {"status": "logged-out"}
-    
-    token = db.query(Token).filter(Token.key == session_id, Token.type == "user_token").first()
-    if token:
-        return {"status": "logged-in"}
+@app.get("/api/session-check")
+async def check(request: Request, db: Session = Depends(get_db)):
+    sid = request.cookies.get("sessionId")
+    t = db.query(Token).filter(Token.key == sid).first() if sid else None
+    if t:
+        user = db.query(User).filter(User.guid == t.user_guid).first()
+        return {"status": "logged-in", "user": {"name": user.profile.get("name")}}
     return {"status": "logged-out"}
 
-# =====================================================================
-# ЭНДПОИНТЫ FEDCM API
-# =====================================================================
-@app.get("/.well-known/web-identity", tags=["FedCM"])
-def get_web_identity():
-    return {"provider_urls": ["/fedcm.json"]}
 
-@app.get("/fedcm.json", tags=["FedCM"])
-def get_fedcm_config(request: Request):
-    base_url = str(request.base_url).rstrip("/")
+# --- FEDCM ЭНДПОИНТЫ ---
+@app.get("/.well-known/web-identity")
+async def web_identity():
+    return {"provider_urls":["https://idp.test/fedcm.json"]}
+
+@app.get("/fedcm.json")
+async def fedcm_config():
+    # Все URL внутри должны быть абсолютными и вести на https://idp.test
+    base_url = "https://idp.test"
     return {
         "accounts_endpoint": f"{base_url}/accounts",
         "client_metadata_endpoint": f"{base_url}/client_metadata",
         "id_assertion_endpoint": f"{base_url}/token",
-        "login_url": f"{base_url}/login" # Указывает на наш эндпоинт-редирект
+        "login_url": f"{base_url}/login"
     }
 
-@app.get("/accounts", tags=["FedCM"])
-def get_accounts(request: Request, response: Response, db: Session = Depends(get_db)):
-    session_id = request.cookies.get("sessionId")
-    if not session_id:
-        response.headers["Set-Login"] = "logged-out"
-        return {"accounts":[]}
-    
-    token = db.query(Token).filter(Token.key == session_id).first()
-    if not token:
-        response.headers["Set-Login"] = "logged-out"
-        return {"accounts":[]}
-        
-    user = db.query(User).filter(User.guid == token.user_guid).first()
-    if not user:
-        response.headers["Set-Login"] = "logged-out"
-        return {"accounts":[]}
+@app.get("/login", tags=["FedCM"])
+async def login_redirect():
+    """
+    Мост для FedCM: Браузер открывает этот эндпоинт в попапе, 
+    а мы сразу перекидываем его на наш React.
+    """
+    return RedirectResponse(url="https://rp.test:5173/login")
 
+@app.get("/client_metadata")
+async def metadata():
+    # Эти ссылки Chrome показывает внизу окна FedCM
+    return {
+        "privacy_policy_url": "https://rp.test:5173/privacy",
+        "terms_of_service_url": "https://rp.test:5173/terms"
+    }
+
+@app.get("/accounts")
+async def accounts(request: Request, response: Response, db: Session = Depends(get_db)):
+    sid = request.cookies.get("sessionId")
+    t = db.query(Token).filter(Token.key == sid).first() if sid else None
+    if not t:
+        response.headers["Set-Login"] = "logged-out"
+        return {"accounts":[]}
+    user = db.query(User).filter(User.guid == t.user_guid).first()
     response.headers["Set-Login"] = "logged-in"
-    return {
-        "accounts":[{
-            "id": user.guid,
-            "name": user.profile.get("name", "Пользователь"),
-            "email": user.email,
-            "picture": "https://www.gravatar.com/avatar/?d=mp",
-            "approved_clients": ["client1234"]
-        }]
-    }
+    return {"accounts":[{
+        "id": user.guid, "name": user.profile.get("name"), "email": user.email,
+        "picture": "https://www.gravatar.com/avatar/?d=mp",
+        "approved_clients": ["client1234"]
+    }]}
 
-@app.get("/client_metadata", tags=["FedCM"])
-def get_client_metadata(request: Request):
-    base_url = str(request.base_url).rstrip("/")
-    return {
-        "privacy_policy_url": f"{base_url}/privacy",
-        "terms_of_service_url": f"{base_url}/terms"
-    }
-
-@app.post("/token", tags=["FedCM"])
-def issue_token(request: Request, account_id: str = Form(None), db: Session = Depends(get_db)):
-    if not account_id:
-        raise HTTPException(status_code=400, detail="Missing account_id")
-        
+@app.post("/token")
+async def token(account_id: Annotated[str, Form()], db: Session = Depends(get_db)):
     user = db.query(User).filter(User.guid == account_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    base_url = str(request.base_url).rstrip("/")
-    payload = {
-        "iss": base_url,
-        "sub": user.guid,
-        "email": user.email,
-        "name": user.profile.get("name", ""),
-        "exp": int(time.time()) + 3600
-    }
+    payload = {"sub": user.guid, "iat": int(time.time()), "exp": int(time.time()) + 3600}
+    # В дипломном варианте используем наш секрет
     token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
     return {"token": token}

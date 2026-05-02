@@ -22,9 +22,12 @@ function Home() {
                     providers:[{
                         configURL: `${import.meta.env.VITE_API_URL}/fedcm.json`,
                         clientId: "client1234",
-                        nonce: "random-nonce-" + Math.random()
+                        params: {
+                            nonce: "random-nonce-" + Math.random()
+                        }
                     }]
-                }
+                },
+                mediation: 'optional' 
             });
 
             if (credential && credential.token) {

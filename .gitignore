@@ -1,9 +1,14 @@
 # Виртуальное окружение
 venv/
 env/
-.env
 
-# База данных SQLite
+# Секреты
+.env
+.env.local
+backend/.env
+frontend/.env
+
+# База данных
 *.db
 sso_database.db
 
