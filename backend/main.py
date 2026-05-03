@@ -3,7 +3,7 @@ import time
 from typing import Annotated
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse  # <--- Добавили импорт для редиректа
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 import jwt
 import bcrypt
@@ -16,7 +16,7 @@ from database import engine, SessionLocal
 
 load_dotenv()
 
-# Если переменная не найдена, используем запасной вариант (только для локальной разработки)
+# Если переменная не найдена, используем запасной вариант
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sso_database.db")
 JWT_SECRET = os.getenv("JWT_SECRET", "fallback-secret-key-change-me")
 
@@ -141,6 +141,16 @@ async def accounts(request: Request, response: Response, db: Session = Depends(g
 async def token(account_id: Annotated[str, Form()], db: Session = Depends(get_db)):
     user = db.query(User).filter(User.guid == account_id).first()
     payload = {"sub": user.guid, "iat": int(time.time()), "exp": int(time.time()) + 3600}
-    # В дипломном варианте используем наш секрет
     token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
     return {"token": token}
+
+@app.get("/mark-login", tags=["FedCM System"])
+async def mark_login(redirect_url: str):
+    """
+    ТРАМПЛИН ДЛЯ БРАУЗЕРА:
+    Так как это прямой переход (top-level navigation) на домен IdP,
+    Chrome официально примет заголовок Set-Login и обновит статус FedCM.
+    """
+    response = RedirectResponse(url=redirect_url)
+    response.headers["Set-Login"] = "logged-in"
+    return response
