@@ -56,9 +56,16 @@ function Home() {
         <div style={styles.container}>
             <div style={styles.card}>
                 <h1>Демо SSO (Relying Party)</h1>
-                
+
                 <div style={styles.statusBox}>
-                    Статус: <strong>{authStatus === 'checking' ? '⏳ Проверка...' : (authStatus === 'logged-in' ? `✅ Вошли как ${user?.name}` : '❌ Не авторизованы')}</strong>
+                    <span style={{ marginRight: '10px' }}>
+                        Статус: <strong>{authStatus === 'checking' ? '⏳ Проверка...' : (authStatus === 'logged-in' ? `✅ Вошли как ${user?.name}` : '❌ Не авторизованы')}</strong>
+                    </span>
+                    {authStatus === 'logged-in' && (
+                        <button onClick={() => window.location.href='/profile'} style={styles.profileBtn}>
+                            Профиль
+                        </button>
+                    )}
                 </div>
 
                 <div style={styles.buttonGroup}>
@@ -99,7 +106,8 @@ const styles = {
     buttonGroup: { display: 'flex', flexDirection: 'column', gap: '12px' },
     btn: { padding: '14px 24px', borderRadius: '8px', border: 'none', color: 'white', background: '#007bff', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' },
     infoText: { color: '#6c757d', marginTop: '15px' },
-    tokenBox: { marginTop: '20px', padding: '15px', background: '#d4edda', borderRadius: '8px', wordBreak: 'break-all', textAlign: 'left', color: '#155724' }
+    tokenBox: { marginTop: '20px', padding: '15px', background: '#d4edda', borderRadius: '8px', wordBreak: 'break-all', textAlign: 'left', color: '#155724' },
+    profileBtn: { padding: '5px 12px', borderRadius: '6px', border: '1px solid #007bff', background: 'transparent', color: '#007bff', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', transition: '0.2s'},
 };
 
 export default Home;

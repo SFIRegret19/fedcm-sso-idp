@@ -11,7 +11,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 
 from models import Base, User, Token
-from schemas import UserCreate, UserLogin
+from schemas import UserCreate, UserLogin, UserUpdate, PasswordChange
 from database import engine, SessionLocal
 
 load_dotenv()
@@ -89,6 +89,56 @@ async def check(request: Request, db: Session = Depends(get_db)):
         return {"status": "logged-in", "user": {"name": user.profile.get("name")}}
     return {"status": "logged-out"}
 
+# --- Вспомогательная функция проверки авторизации ---
+def get_current_user(request: Request, db: Session = Depends(get_db)):
+    sid = request.cookies.get("sessionId")
+    if not sid:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    token = db.query(Token).filter(Token.key == sid).first()
+    if not token:
+        raise HTTPException(status_code=401, detail="Сессия недействительна")
+    user = db.query(User).filter(User.guid == token.user_guid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return user
+
+@app.get("/api/profile", tags=["User Profile"])
+async def get_profile(current_user: User = Depends(get_current_user)):
+    """Получить данные профиля"""
+    return {
+        "email": current_user.email,
+        "name": current_user.profile.get("name", "")
+    }
+
+@app.put("/api/profile", tags=["User Profile"])
+async def update_profile(data: UserUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # 1. Если почта меняется, проверяем, не занята ли новая почта кем-то другим
+    if data.email != current_user.email:
+        existing_user = db.query(User).filter(User.email == data.email).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Этот Email уже занят другим пользователем")
+        current_user.email = data.email
+        current_user.login = data.email # Обновляем и логин, так как они у нас связаны
+
+    # 2. Обновляем имя в профиле
+    profile_data = dict(current_user.profile)
+    profile_data["name"] = data.name
+    current_user.profile = profile_data
+    
+    db.commit()
+    return {"status": "success", "message": "Профиль обновлен"}
+
+@app.post("/api/change-password", tags=["User Profile"])
+async def change_password(data: PasswordChange, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Смена пароля"""
+    # Проверяем старый пароль
+    if not verify_password(data.old_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Неверный старый пароль")
+    
+    # Сохраняем новый пароль
+    current_user.password_hash = hash_password(data.new_password)
+    db.commit()
+    return {"status": "success", "message": "Пароль успешно изменен"}
 
 # --- FEDCM ЭНДПОИНТЫ ---
 @app.get("/.well-known/web-identity")
