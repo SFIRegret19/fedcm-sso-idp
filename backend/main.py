@@ -25,7 +25,7 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Identity Provider (IdP)")
 
-# Настройка CORS (Разрешаем нашему React-домену)
+# Настройка CORS (Разрешаем React-домену)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://rp.test:5173"], 
@@ -89,6 +89,34 @@ async def check(request: Request, db: Session = Depends(get_db)):
         return {"status": "logged-in", "user": {"name": user.profile.get("name")}}
     return {"status": "logged-out"}
 
+@app.get("/api/get-redirect-token", tags=["Classic SSO"])
+# Эндпоинт для получения токена после классического логина (редиректа)
+async def get_redirect_token(request: Request, db: Session = Depends(get_db)):
+    sid = request.cookies.get("sessionId")
+    if not sid:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+        
+    token_record = db.query(Token).filter(Token.key == sid).first()
+    if not token_record:
+        raise HTTPException(status_code=401, detail="Сессия недействительна")
+        
+    user = db.query(User).filter(User.guid == token_record.user_guid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    # Генерируем токен (используем тот же секрет, что и в FedCM)
+    base_url = str(request.base_url).rstrip("/")
+    payload = {
+        "sub": user.guid,
+        "email": user.email,
+        "name": user.profile.get("name", ""),
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 3600
+    }
+    jwt_token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    
+    return {"token": jwt_token}
+
 # --- Вспомогательная функция проверки авторизации ---
 def get_current_user(request: Request, db: Session = Depends(get_db)):
     sid = request.cookies.get("sessionId")
@@ -103,8 +131,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
     return user
 
 @app.get("/api/profile", tags=["User Profile"])
+# Получить данные профиля
 async def get_profile(current_user: User = Depends(get_current_user)):
-    """Получить данные профиля"""
     return {
         "email": current_user.email,
         "name": current_user.profile.get("name", "")
@@ -118,7 +146,7 @@ async def update_profile(data: UserUpdate, db: Session = Depends(get_db), curren
         if existing_user:
             raise HTTPException(status_code=400, detail="Этот Email уже занят другим пользователем")
         current_user.email = data.email
-        current_user.login = data.email # Обновляем и логин, так как они у нас связаны
+        current_user.login = data.email # Обновляем и логин, так как они связаны
 
     # 2. Обновляем имя в профиле
     profile_data = dict(current_user.profile)
@@ -129,8 +157,8 @@ async def update_profile(data: UserUpdate, db: Session = Depends(get_db), curren
     return {"status": "success", "message": "Профиль обновлен"}
 
 @app.post("/api/change-password", tags=["User Profile"])
+# Эндпоинт для изменения пароля. Требует старый пароль для безопасности.
 async def change_password(data: PasswordChange, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Смена пароля"""
     # Проверяем старый пароль
     if not verify_password(data.old_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Неверный старый пароль")
@@ -157,11 +185,8 @@ async def fedcm_config():
     }
 
 @app.get("/login", tags=["FedCM"])
+# Этот эндпоинт нужен для того, чтобы Chrome официально принял статус "logged-in" при входе через FedCM
 async def login_redirect():
-    """
-    Мост для FedCM: Браузер открывает этот эндпоинт в попапе, 
-    а мы сразу перекидываем его на наш React.
-    """
     return RedirectResponse(url="https://rp.test:5173/login")
 
 @app.get("/client_metadata")
@@ -188,19 +213,28 @@ async def accounts(request: Request, response: Response, db: Session = Depends(g
     }]}
 
 @app.post("/token")
-async def token(account_id: Annotated[str, Form()], db: Session = Depends(get_db)):
+async def token(request: Request, account_id: Annotated[str, Form()], db: Session = Depends(get_db)):
     user = db.query(User).filter(User.guid == account_id).first()
-    payload = {"sub": user.guid, "iat": int(time.time()), "exp": int(time.time()) + 3600}
+    if not user: raise HTTPException(404)
+    
+    # Делаем "начинку" (payload) точно такой же, как в редиректе
+    base_url = str(request.base_url).rstrip("/")
+    payload = {
+        "iss": base_url,
+        "sub": user.guid,
+        "email": user.email,
+        "name": user.profile.get("name", ""),
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 3600
+    }
+    
     token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
     return {"token": token}
 
 @app.get("/mark-login", tags=["FedCM System"])
+# ТРАМПЛИН ДЛЯ БРАУЗЕРА: Так как это прямой переход (top-level navigation) на домен IdP, 
+# Chrome официально примет заголовок Set-Login и обновит статус FedCM.
 async def mark_login(redirect_url: str):
-    """
-    ТРАМПЛИН ДЛЯ БРАУЗЕРА:
-    Так как это прямой переход (top-level navigation) на домен IdP,
-    Chrome официально примет заголовок Set-Login и обновит статус FedCM.
-    """
     response = RedirectResponse(url=redirect_url)
     response.headers["Set-Login"] = "logged-in"
     return response

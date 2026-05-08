@@ -1,4 +1,3 @@
-// frontend/src/pages/Home.jsx
 import { useState, useEffect } from 'react';
 import api from '../api';
 import { getFedCmSupportStatus } from '../utils/browser-support';
@@ -21,11 +20,36 @@ function Home() {
             if (res.data.status === 'logged-in') {
                 setAuthStatus('logged-in');
                 setUser(res.data.user);
+                
+                // --- ЛОГИКА СОХРАНЕНИЯ ТОКЕНА ---
+                // Проверяем, есть ли сохраненный токен для вкладки
+                let currentToken = sessionStorage.getItem('access_token');
+                
+                // Если токена нет (впервые зашли) - просим сервер сгенерировать новый
+                if (!currentToken) {
+                    try {
+                        const tokenRes = await api.get('/api/get-redirect-token');
+                        currentToken = tokenRes.data.token;
+                        // Сохраняем свежий токен в память вкладки
+                        sessionStorage.setItem('access_token', currentToken);
+                    } catch (tokenErr) {
+                        console.error("Не удалось получить токен после редиректа", tokenErr);
+                    }
+                }
+                
+                // Отображаем токен на экране
+                setToken(currentToken);
+                
             } else {
+                // Если сервер сказал, что сессии нет - очищаем всё
                 setAuthStatus('logged-out');
+                setToken(null);
+                sessionStorage.removeItem('access_token');
             }
         } catch (e) {
             setAuthStatus('logged-out');
+            setToken(null);
+            sessionStorage.removeItem('access_token');
         }
     };
 
@@ -44,7 +68,9 @@ function Home() {
             });
 
             if (credential) {
+                // FedCM выдал токен. Сохраняем его на экране и в память вкладки
                 setToken(credential.token);
+                sessionStorage.setItem('access_token', credential.token);
             }
         } catch (err) {
             console.error("FedCM Error:", err);
@@ -107,7 +133,7 @@ const styles = {
     btn: { padding: '14px 24px', borderRadius: '8px', border: 'none', color: 'white', background: '#007bff', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' },
     infoText: { color: '#6c757d', marginTop: '15px' },
     tokenBox: { marginTop: '20px', padding: '15px', background: '#d4edda', borderRadius: '8px', wordBreak: 'break-all', textAlign: 'left', color: '#155724' },
-    profileBtn: { padding: '5px 12px', borderRadius: '6px', border: '1px solid #007bff', background: 'transparent', color: '#007bff', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', transition: '0.2s'},
+    profileBtn: { padding: '5px 12px', borderRadius: '6px', border: '1px solid #007bff', background: 'transparent', color: '#007bff', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', transition: '0.2s' }
 };
 
 export default Home;

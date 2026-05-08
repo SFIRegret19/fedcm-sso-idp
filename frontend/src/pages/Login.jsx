@@ -1,4 +1,3 @@
-// frontend/src/pages/Login.jsx
 import { useState } from 'react';
 import api from '../api';
 
@@ -29,8 +28,7 @@ function Login() {
                     setMessage("✅ Успешно! Синхронизация с браузером...");
                     
                     setTimeout(() => {
-                        // Идем на трамплин бэкенда, который выставит куки и перенаправит обратно в React
-                        // Кодируем адрес нашей главной страницы React
+                        // Идем на трамплин бэкенда, кодируем адрес главной страницы React
                         const returnUrl = encodeURIComponent("https://rp.test:5173/");
                         
                         // Переходим на idp.test, чтобы Chrome легально записал статус

@@ -3,7 +3,7 @@
  */
 
 const INCOMPATIBLE_BROWSERS = [
-    { name: 'Yandex Browser', detector: () => window.yandex !== undefined || /YaBrowser/.test(navigator.userAgent) },
+    // Сюда можно добавлять другие исключения
 ];
 
 export function getFedCmSupportStatus() {
