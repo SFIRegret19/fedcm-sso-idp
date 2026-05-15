@@ -55,6 +55,12 @@ function Home() {
 
     const handleFedCMLogin = async () => {
         setError(null);
+        
+        // Контроллер для управления отменой запроса
+        const abortController = new AbortController();
+        // Таймер автоматической отмены через 30 секунд (на случай, если пользователь не ответит или браузер зависнет)
+        const timeoutId = setTimeout(() => abortController.abort(), 30000);
+
         try {
             const credential = await navigator.credentials.get({
                 identity: {
@@ -64,17 +70,28 @@ function Home() {
                         params: { nonce: "random-nonce-" + Math.random() }
                     }]
                 },
-                mediation: 'optional'
+                mediation: 'optional',
+                // Передача сигнала отмены в API браузера
+                signal: abortController.signal 
             });
 
+            // Очистка таймера, если запрос успешно завершился
+            clearTimeout(timeoutId);
+
             if (credential) {
-                // FedCM выдал токен. Сохраняем его на экране и в память вкладки
                 setToken(credential.token);
                 sessionStorage.setItem('access_token', credential.token);
             }
         } catch (err) {
+            clearTimeout(timeoutId);
             console.error("FedCM Error:", err);
-            setError(`Быстрый вход отменен или недоступен. Используйте обычный вход.`);
+            
+            // Обработка случайной отмены (таймаутом или программно)
+            if (err.name === 'AbortError') {
+                setError("Превышено время ожидания ответа от браузера.");
+            } else {
+                setError(`Быстрый вход отменен или недоступен. Используйте обычный вход.`);
+            }
         }
     };
 
