@@ -3,7 +3,21 @@
  */
 
 const INCOMPATIBLE_BROWSERS = [
-    // Сюда можно добавлять другие исключения
+    {
+        name: 'Yandex Browser',
+        detector: () => {
+            if (navigator.userAgent.includes("YaBrowser") || navigator.userAgent.includes("Yandex")) {
+                return true;
+            }
+
+            if (navigator.userAgentData && navigator.userAgentData.brands) {
+                return navigator.userAgentData.brands.some(item => 
+                    item.brand.includes("YaBrowser") || item.brand.includes("Yandex")
+                );
+            }
+            return false;
+        }
+    }
 ];
 
 export function getFedCmSupportStatus() {

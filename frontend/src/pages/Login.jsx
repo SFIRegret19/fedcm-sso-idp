@@ -28,10 +28,8 @@ function Login() {
                     setMessage("✅ Успешно! Синхронизация с браузером...");
                     
                     setTimeout(() => {
-                        // Идем на трамплин бэкенда, кодируем адрес главной страницы React
                         const returnUrl = encodeURIComponent("https://rp.test:5173/");
                         
-                        // Переходим на idp.test, чтобы Chrome легально записал статус
                         window.location.href = `https://idp.test/mark-login?redirect_url=${returnUrl}`;
                     }, 1000);
                 }

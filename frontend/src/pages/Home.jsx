@@ -3,7 +3,7 @@ import api from '../api';
 import { getFedCmSupportStatus } from '../utils/browser-support';
 
 function Home() {
-    const [authStatus, setAuthStatus] = useState('checking'); // checking, logged-in, logged-out
+    const [authStatus, setAuthStatus] = useState('checking');
     const [user, setUser] = useState(null);
     const [token, setToken] = useState(null);
     const [fedCmStatus, setFedCmStatus] = useState({ supported: false, reason: '' });
@@ -21,27 +21,21 @@ function Home() {
                 setAuthStatus('logged-in');
                 setUser(res.data.user);
                 
-                // --- ЛОГИКА СОХРАНЕНИЯ ТОКЕНА ---
-                // Проверяем, есть ли сохраненный токен для вкладки
                 let currentToken = sessionStorage.getItem('access_token');
                 
-                // Если токена нет (впервые зашли) - просим сервер сгенерировать новый
                 if (!currentToken) {
                     try {
                         const tokenRes = await api.get('/api/get-redirect-token');
                         currentToken = tokenRes.data.token;
-                        // Сохраняем свежий токен в память вкладки
                         sessionStorage.setItem('access_token', currentToken);
                     } catch (tokenErr) {
                         console.error("Не удалось получить токен после редиректа", tokenErr);
                     }
                 }
                 
-                // Отображаем токен на экране
                 setToken(currentToken);
                 
             } else {
-                // Если сервер сказал, что сессии нет - очищаем всё
                 setAuthStatus('logged-out');
                 setToken(null);
                 sessionStorage.removeItem('access_token');
@@ -56,9 +50,7 @@ function Home() {
     const handleFedCMLogin = async () => {
         setError(null);
         
-        // Контроллер для управления отменой запроса
         const abortController = new AbortController();
-        // Таймер автоматической отмены через 30 секунд (на случай, если пользователь не ответит или браузер зависнет)
         const timeoutId = setTimeout(() => abortController.abort(), 30000);
 
         try {
@@ -71,11 +63,9 @@ function Home() {
                     }]
                 },
                 mediation: 'optional',
-                // Передача сигнала отмены в API браузера
                 signal: abortController.signal 
             });
 
-            // Очистка таймера, если запрос успешно завершился
             clearTimeout(timeoutId);
 
             if (credential) {
@@ -86,7 +76,6 @@ function Home() {
             clearTimeout(timeoutId);
             console.error("FedCM Error:", err);
             
-            // Обработка случайной отмены (таймаутом или программно)
             if (err.name === 'AbortError') {
                 setError("Превышено время ожидания ответа от браузера.");
             } else {
@@ -112,14 +101,12 @@ function Home() {
                 </div>
 
                 <div style={styles.buttonGroup}>
-                    {/* Кнопка FedCM появляется ТОЛЬКО если есть сессия и поддержка */}
                     {fedCmStatus.supported && authStatus === 'logged-in' && (
                         <button onClick={handleFedCMLogin} style={{...styles.btn, background: '#28a745'}}>
                             Быстрый вход (FedCM)
                         </button>
                     )}
 
-                    {/* Обычная кнопка входа (Редирект) */}
                     <button onClick={() => window.location.href='/login'} style={styles.btn}>
                         {authStatus === 'logged-in' ? 'Сменить аккаунт (через форму)' : 'Войти через форму'}
                     </button>
